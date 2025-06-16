@@ -1,0 +1,16 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Store Management App",
+			"type": "shell",
+			"command": "flutter run",
+			"group": "test",
+			"isBackground": true,
+			"problemMatcher": [
+				"$flutter"
+			],
+			"args": []
+		}
+	]
+}
