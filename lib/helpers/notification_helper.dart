@@ -145,7 +145,7 @@ class NotificationHelper {
 
   static Future<bool> hasPermission() async {
     try {
-      return await OneSignal.Notifications.permission;
+      return OneSignal.Notifications.permission;
     } catch (e) {
       if (kDebugMode) {
         print('Failed to check OneSignal permission: $e');

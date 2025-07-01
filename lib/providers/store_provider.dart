@@ -5,6 +5,7 @@ import 'dart:developer' as dev;
 import 'dart:convert';
 import '../models/order_statistics.dart';
 import '../models/store_data.dart';
+import '../models/fainzy_user.dart';
 import '../services/statistics_repository.dart';
 import '../helpers/currency_formatter.dart';
 
@@ -63,8 +64,10 @@ class StoreProvider with ChangeNotifier {
   // Core store data
   StoreData? _storeData;
   OrderStatistics? _orderStatistics;
+  List<FainzyUser> _topCustomers = [];
   StoreStatus _status = StoreStatus.close;
   DataStatus _dataStatus = DataStatus.loading;
+  DataStatus _topCustomersStatus = DataStatus.loading;
   String? _error;
 
   // Repositories
@@ -73,14 +76,22 @@ class StoreProvider with ChangeNotifier {
   // Getters
   StoreData? get storeData => _storeData;
   OrderStatistics? get orderStatistics => _orderStatistics;
+  List<FainzyUser> get topCustomers => _topCustomers;
   StoreStatus get status => _status;
   DataStatus get dataStatus => _dataStatus;
+  DataStatus get topCustomersStatus => _topCustomersStatus;
   String? get error => _error;
 
   // Store basic info
   String get storeName => _storeData?.name ?? 'My Store';
-  String get storeAddress => _storeData?.location?.addressDetails ?? '123 Main St';
+  String get storeBranch => _storeData?.branch ?? 'Main Branch';
+  String get storeAddress => _storeData?.address?.addressDetails ?? _storeData?.location?.addressDetails ?? 'Address not set';
+  String? get storeImageUrl => _storeData?.image?.upload;
+  double get storeRating => _storeData?.rating ?? 4.8;
+  int get totalReviews => _storeData?.totalReviews ?? 324;
   String get currency => _storeData?.currency ?? 'USD';
+  String? get storePhoneNumber => _storeData?.phoneNumber;
+  String? get storeDescription => _storeData?.description;
   bool get isClosed => _status.isClosed;
   bool get isOpen => _status.isOpen;
   bool get isLoggedOut => _status.isLoggedOut;
@@ -90,6 +101,17 @@ class StoreProvider with ChangeNotifier {
   int get pendingOrders => _orderStatistics?.totalPendingOrders ?? 0;
   int get completedOrders => _orderStatistics?.totalCompletedOrders ?? 0;
   int get totalOrders => _orderStatistics?.totalOrders ?? 0;
+  
+  // Active orders = Total - Pending - Completed (orders that are in progress)
+  int get activeOrders {
+    final total = totalOrders;
+    final pending = pendingOrders;
+    final completed = completedOrders;
+    
+    // Active orders are those that are not pending and not completed
+    final active = total - pending - completed;
+    return active > 0 ? active : 0; // Ensure non-negative value
+  }
 
   // Calculated metrics
   double get averageOrderValue {
@@ -144,8 +166,14 @@ class StoreProvider with ChangeNotifier {
       // Fetch order statistics
       await _fetchOrderStatistics();
 
+      // Fetch top customers
+      await _fetchTopCustomers();
+
       _dataStatus = DataStatus.loaded;
       dev.log('✅ StoreProvider: Data loaded successfully');
+      
+      // Validate data integrity
+      validateDataIntegrity();
     } catch (e) {
       _error = e.toString();
       _dataStatus = DataStatus.error;
@@ -203,22 +231,47 @@ class StoreProvider with ChangeNotifier {
         dev.log('⚠️ No store ID available for fetching statistics');
         // Use mock data for development
         _orderStatistics = const OrderStatistics(
-          totalOrders: 42,
-          totalPendingOrders: 5,
-          totalCompletedOrders: 37,
-          totalRevenue: 2450.75,
+          totalOrders: 0,
+          totalPendingOrders: 0,
+          totalCompletedOrders: 0,
+          totalRevenue: 0.0,
         );
       }
     } catch (e) {
       dev.log('⚠️ Error fetching order statistics: $e');
       // Use fallback mock data
       _orderStatistics = const OrderStatistics(
-        totalOrders: 42,
-        totalPendingOrders: 5,
-        totalCompletedOrders: 37,
-        totalRevenue: 2450.75,
+        totalOrders: 0,
+        totalPendingOrders: 0,
+        totalCompletedOrders: 0,
+        totalRevenue: 0.0,
       );
     }
+  }
+
+  /// Fetch top customers from API
+  Future<void> _fetchTopCustomers() async {
+    try {
+      _topCustomersStatus = DataStatus.loading;
+      notifyListeners();
+
+      if (_storeData?.id != null) {
+        _topCustomers = await _statisticsRepository.fetchTopCustomers(
+          subEntityId: _storeData!.id!,
+        );
+        dev.log('🏆 Loaded ${_topCustomers.length} top customers');
+        _topCustomersStatus = DataStatus.loaded;
+      } else {
+        dev.log('⚠️ No store ID available for fetching top customers');
+        _topCustomers = [];
+        _topCustomersStatus = DataStatus.error;
+      }
+    } catch (e) {
+      dev.log('⚠️ Error fetching top customers: $e');
+      _topCustomers = [];
+      _topCustomersStatus = DataStatus.error;
+    }
+    notifyListeners();
   }
 
   /// Toggle store open/closed status
@@ -296,6 +349,12 @@ class StoreProvider with ChangeNotifier {
     await _loadStoreData();
   }
 
+  /// Refresh top customers data
+  Future<void> refreshTopCustomers() async {
+    dev.log('🔄 StoreProvider: Refreshing top customers...');
+    await _fetchTopCustomers();
+  }
+
   /// Save store data to SharedPreferences
   Future<void> _saveStoreData() async {
     if (_storeData != null) {
@@ -323,5 +382,75 @@ class StoreProvider with ChangeNotifier {
     
     _saveStoreData();
     notifyListeners();
+  }
+
+  /// Validate data integrity and log any inconsistencies
+  void validateDataIntegrity() {
+    final errors = <String>[];
+    
+    // Validate order statistics
+    if (_orderStatistics != null) {
+      final stats = _orderStatistics!;
+      
+      // Check for null or negative values
+      if (stats.totalOrders != null && stats.totalOrders! < 0) {
+        errors.add('Total orders is negative: ${stats.totalOrders}');
+      }
+      
+      if (stats.totalRevenue != null && stats.totalRevenue! < 0) {
+        errors.add('Total revenue is negative: ${stats.totalRevenue}');
+      }
+      
+      // Check for logical inconsistencies
+      if (stats.totalOrders != null && stats.totalCompletedOrders != null && 
+          stats.totalPendingOrders != null) {
+        final calculated = (stats.totalCompletedOrders! + stats.totalPendingOrders! + activeOrders);
+        if (calculated != stats.totalOrders!) {
+          errors.add('Order count mismatch: completed(${stats.totalCompletedOrders}) + pending(${stats.totalPendingOrders}) + active($activeOrders) = $calculated ≠ total(${stats.totalOrders})');
+        }
+      }
+      
+      // Check average order value calculation
+      if (stats.totalOrders != null && stats.totalOrders! > 0 && 
+          stats.totalRevenue != null && stats.totalRevenue! > 0) {
+        final expectedAvg = stats.totalRevenue! / stats.totalOrders!;
+        final actualAvg = averageOrderValue;
+        if ((expectedAvg - actualAvg).abs() > 0.01) {
+          errors.add('Average order value calculation error: expected($expectedAvg) vs actual($actualAvg)');
+        }
+      }
+    }
+    
+    // Validate store data
+    if (_storeData != null) {
+      final store = _storeData!;
+      
+      // Check for missing required fields
+      if (store.name == null || store.name!.isEmpty) {
+        errors.add('Store name is missing');
+      }
+      
+      if (store.rating != null && (store.rating! < 0 || store.rating! > 5)) {
+        errors.add('Invalid store rating: ${store.rating} (should be 0-5)');
+      }
+      
+      // Check status consistency
+      if (store.status != null && store.isOpen != null) {
+        final statusOpen = StoreStatus.fromValue(store.status!).isOpen;
+        if (statusOpen != store.isOpen!) {
+          errors.add('Store status inconsistency: status field indicates ${statusOpen ? 'open' : 'closed'} but isOpen field is ${store.isOpen}');
+        }
+      }
+    }
+    
+    // Log validation results
+    if (errors.isNotEmpty) {
+      dev.log('⚠️ StoreProvider data validation errors:');
+      for (final error in errors) {
+        dev.log('  - $error');
+      }
+    } else {
+      dev.log('✅ StoreProvider data validation passed');
+    }
   }
 }

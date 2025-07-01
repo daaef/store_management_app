@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <3.22.1'
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -41,6 +41,7 @@ dev_dependencies:
   # flutter_gen_runner: ^5.0.3
   json_serializable: ^6.7.1
   flutter_lints: ^2.0.3
+  analyzer: ^6.2.0
 
 flutter:
   uses-material-design: true
@@ -59,3 +60,6 @@ flutter:
 #     flutter_svg: true
 #     rive: true
 #     lottie: true
+
+dependency_overrides:
+  win32: ^3.1.4

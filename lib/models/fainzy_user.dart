@@ -1,74 +1,61 @@
-import 'dart:convert';
-import 'package:json_annotation/json_annotation.dart';
-
-part 'fainzy_user.g.dart';
-
-@JsonSerializable()
 class FainzyUser {
   final int? id;
   final String? name;
+  final String? firstName;
+  final String? lastName;
   final String? email;
   final String? phone;
-  final DateTime? created;
-  final DateTime? updated;
+  final String? phoneNumber;
 
   const FainzyUser({
     this.id,
     this.name,
+    this.firstName,
+    this.lastName,
     this.email,
     this.phone,
-    this.created,
-    this.updated,
+    this.phoneNumber,
   });
 
-  FainzyUser copyWith({
-    int? id,
-    String? name,
-    String? email,
-    String? phone,
-    DateTime? created,
-    DateTime? updated,
-  }) {
+  factory FainzyUser.fromJson(Map<String, dynamic> json) {
     return FainzyUser(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      email: email ?? this.email,
-      phone: phone ?? this.phone,
-      created: created ?? this.created,
-      updated: updated ?? this.updated,
+      id: json['id'] != null 
+          ? (json['id'] is int 
+              ? json['id'] as int 
+              : int.tryParse(json['id'].toString()))
+          : null,
+      name: json['name'] as String?,
+      firstName: json['first_name'] as String? ?? json['firstName'] as String?,
+      lastName: json['last_name'] as String? ?? json['lastName'] as String?,
+      email: json['email'] as String?,
+      phone: json['phone'] as String?,
+      phoneNumber: json['phone_number'] as String? ?? json['phoneNumber'] as String?,
     );
   }
 
-  factory FainzyUser.fromJson(Map<String, dynamic> json) =>
-      _$FainzyUserFromJson(json);
-
-  Map<String, dynamic> toJson() => _$FainzyUserToJson(this);
-
-  @override
-  String toString() {
-    return 'FainzyUser(id: $id, name: $name, email: $email, phone: $phone, created: $created, updated: $updated)';
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'first_name': firstName,
+      'last_name': lastName,
+      'email': email,
+      'phone': phone,
+      'phone_number': phoneNumber,
+    };
   }
 
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-
-    return other is FainzyUser &&
-        other.id == id &&
-        other.name == name &&
-        other.email == email &&
-        other.phone == phone &&
-        other.created == created &&
-        other.updated == updated;
-  }
-
-  @override
-  int get hashCode {
-    return id.hashCode ^
-        name.hashCode ^
-        email.hashCode ^
-        phone.hashCode ^
-        created.hashCode ^
-        updated.hashCode;
+  /// Get the full name of the user
+  String get fullName {
+    if (firstName != null && lastName != null) {
+      return '$firstName $lastName';
+    } else if (name != null) {
+      return name!;
+    } else if (firstName != null) {
+      return firstName!;
+    } else if (lastName != null) {
+      return lastName!;
+    }
+    return 'Anonymous Customer';
   }
 }

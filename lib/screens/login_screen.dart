@@ -17,12 +17,66 @@ class _LoginScreenState extends State<LoginScreen> {
   final _storeIdController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
+  bool _isCheckingExistingToken = false;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkExistingToken();
+  }
 
   @override
   void dispose() {
     _storeIdController.dispose();
     super.dispose();
+  }
+
+  /// Check if user already has a valid token before showing login form
+  Future<void> _checkExistingToken() async {
+    setState(() {
+      _isCheckingExistingToken = true;
+    });
+
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      
+      print('🔍 LOGIN: Checking for existing valid token...');
+      
+      // Validate stored token
+      final hasValidToken = await authProvider.validateStoredToken();
+      
+      if (!mounted) return;
+      
+      if (hasValidToken) {
+        print('✅ LOGIN: Found valid token - redirecting to appropriate screen');
+        
+        // User already has valid token, redirect based on setup status
+        if (authProvider.storeData?.isSetup == true) {
+          print('🏪 LOGIN: Store setup complete - going to home feed');
+          AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+            Routes.routeRoot,
+            (route) => false,
+          );
+        } else {
+          print('⚙️ LOGIN: Store setup incomplete - going to setup');
+          AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+            Routes.routeStoreSetup,
+            (route) => false,
+          );
+        }
+        return;
+      }
+      
+      print('❌ LOGIN: No valid token found - showing login form');
+    } catch (e) {
+      print('⚠️ LOGIN: Error checking existing token: $e');
+      // Continue to show login form on error
+    }
+    
+    setState(() {
+      _isCheckingExistingToken = false;
+    });
   }
 
   void _handleLogin() async {
@@ -36,34 +90,38 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    final storeId = _storeIdController.text.trim();
+    
     // Start loading
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // Attempt login
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final success = await authProvider.login(_storeIdController.text.trim());
+      
+      print('🔄 LOGIN: Starting login process for store: $storeId');
+      
+      // Double-check if we already have a valid token for this store
+      final hasExistingValidToken = await authProvider.validateStoredToken();
+      
+      if (!mounted) return;
+      
+      if (hasExistingValidToken && authProvider.storeId == storeId) {
+        print('✅ LOGIN: Already authenticated for this store - redirecting');
+        _redirectBasedOnSetupStatus(authProvider);
+        return;
+      }
+      
+      // Proceed with login
+      final success = await authProvider.login(storeId);
 
       // If widget is no longer mounted, stop
       if (!mounted) return;
 
       if (success) {
-        // Check if store setup is completed
-        if (authProvider.storeData?.isSetup == true) {
-          // Store is set up, go to main app
-          AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
-            Routes.routeRoot,
-            (route) => false,
-          );
-        } else {
-          // Store is not set up, go to store setup
-          AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
-            Routes.routeStoreSetup,
-            (route) => false,
-          );
-        }
+        print('🎉 LOGIN: Login successful - redirecting user');
+        _redirectBasedOnSetupStatus(authProvider);
       } else {
         // Show error from provider
         setState(() {
@@ -73,6 +131,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       // Show error
+      print('❌ LOGIN: Login error: $e');
       setState(() {
         _errorMessage = 'Login failed: ${e.toString()}';
         _isLoading = false;
@@ -80,8 +139,52 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  /// Redirect user based on store setup status
+  void _redirectBasedOnSetupStatus(AuthProvider authProvider) {
+    if (authProvider.storeData?.isSetup == true) {
+      print('🏪 LOGIN: Store setup complete - going to home feed');
+      // Store is set up, go to main app
+      AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+        Routes.routeRoot,
+        (route) => false,
+      );
+    } else {
+      print('⚙️ LOGIN: Store setup incomplete - going to setup');
+      // Store is not set up, go to store setup
+      AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+        Routes.routeStoreSetup,
+        (route) => false,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Show loading screen while checking for existing token
+    if (_isCheckingExistingToken) {
+      return Scaffold(
+        backgroundColor: const Color.fromARGB(255, 33, 82, 155),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+              SizedBox(height: 20),
+              Text(
+                'Checking authentication...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
           title: const Row(

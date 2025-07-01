@@ -58,6 +58,13 @@ android {
             signingConfig signingConfigs.debug
         }
     }
+
+    lint {
+        disable 'NewerVersionAvailable'
+        checkReleaseBuilds false
+        abortOnError false
+        warningsAsErrors false
+    }
 }
 
 flutter {

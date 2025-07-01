@@ -11,6 +11,9 @@ class Routes {
   // Menus
   static const routeMenus = '/menus';
   static const routeCreateMenu = '/create-menu';
+  static const routeMenuDetails = '/menu-details';
+  static const routeEditMenu = '/edit-menu';
+  static const routeAddMenu = '/add_menu';
 
   // Orders
   static const routeOrders = '/orders';

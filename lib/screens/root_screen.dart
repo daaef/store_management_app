@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/navigation_provider.dart';
 import '../screens/home_feed_screen.dart';
 import '../screens/order_management_screen.dart';
-import '../screens/menu_management_screen.dart';
+import '../screens/menu_screen_beautiful.dart';
 import '../screens/profile_screen.dart';
 
 class RootScreen extends StatelessWidget {
@@ -51,7 +51,7 @@ class _RootView extends StatelessWidget {
     final pages = [
       const HomeFeedScreen(),
       const OrderManagementScreen(),
-      const MenuManagementScreen(),
+      const MenuScreen(),
       const ProfileScreen(),
     ];
 

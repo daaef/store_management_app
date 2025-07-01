@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/location.dart';
 import '../models/store_data.dart';
 import '../services/fainzy_api_client.dart';
+import '../services/currency_service.dart';
 
 enum StoreSetupStatus { initial, editing, validating, submitting, success, failed }
 enum StoreSetupStep { basicInfo, contactDetails, location, schedule, review }
@@ -24,7 +25,7 @@ class StoreSetupProvider with ChangeNotifier {
   String _storeName = '';
   String _storeDescription = '';
   PhoneNumber _phoneNumber = PhoneNumber(isoCode: 'US');
-  String _selectedCurrency = 'JPY';
+  String _selectedCurrency = 'JPY'; // Default to Yen
   TimeOfDay _openTime = const TimeOfDay(hour: 9, minute: 0);
   TimeOfDay _closeTime = const TimeOfDay(hour: 18, minute: 0);
   Set<int> _workingDays = {1, 2, 3, 4, 5}; // Monday to Friday
@@ -36,13 +37,13 @@ class StoreSetupProvider with ChangeNotifier {
   List<String> _carouselImages = [];
 
   // Multiple images support (for carousel picker)
-  List<File> _images = [];
+  final List<File> _images = [];
 
   // Additional address fields that are actually used
   String _houseDetails = '';
 
-  // Available options
-  final List<String> _supportedCurrencies = ['JPY', 'USD', 'EUR', 'GBP', 'NGN', 'GHS'];
+  // Available options - now using CurrencyService
+  List<String> get supportedCurrencies => CurrencyService.supportedCurrencies.map((c) => c['code'] as String).toList();
   final List<String> _dayNames = [
     'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
   ];
@@ -70,7 +71,6 @@ class StoreSetupProvider with ChangeNotifier {
   List<File> get images => _images;
   String get houseDetails => _houseDetails;
 
-  List<String> get supportedCurrencies => _supportedCurrencies;
   List<String> get dayNames => _dayNames;
 
   // Computed getters
@@ -270,7 +270,7 @@ class StoreSetupProvider with ChangeNotifier {
       // Currency
       if (storeData.currency != null) {
         final upperCurrency = storeData.currency!.toUpperCase();
-        if (_supportedCurrencies.contains(upperCurrency)) {
+        if (supportedCurrencies.contains(upperCurrency)) {
           _selectedCurrency = upperCurrency;
           dev.log('💰 Loaded currency: $_selectedCurrency');
         } else {
@@ -554,7 +554,7 @@ class StoreSetupProvider with ChangeNotifier {
         if (currency != null) {
           // Convert to uppercase for our supported currencies
           final upperCurrency = currency.toUpperCase();
-          if (_supportedCurrencies.contains(upperCurrency)) {
+          if (supportedCurrencies.contains(upperCurrency)) {
             _selectedCurrency = upperCurrency;
             dev.log('💰 Loaded currency: $_selectedCurrency');
           } else {
@@ -844,7 +844,7 @@ class StoreSetupProvider with ChangeNotifier {
         dev.log('📝 Loaded draft description: $savedDescription');
       }
       
-      if (savedCurrency != null && _supportedCurrencies.contains(savedCurrency)) {
+      if (savedCurrency != null && supportedCurrencies.contains(savedCurrency)) {
         _selectedCurrency = savedCurrency;
         dev.log('💰 Loaded draft currency: $savedCurrency');
       }
@@ -873,8 +873,10 @@ class StoreSetupProvider with ChangeNotifier {
   }
 
   void updateCurrency(String currency) {
-    if (_supportedCurrencies.contains(currency)) {
+    if (supportedCurrencies.contains(currency)) {
       _selectedCurrency = currency;
+      // Also save to currency service
+      CurrencyService.setCurrency(currency);
       _saveFormData();
       notifyListeners();
     }

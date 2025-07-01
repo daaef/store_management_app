@@ -1,13 +1,11 @@
-import 'dart:convert';
-import 'package:json_annotation/json_annotation.dart';
-import 'fainzy_cart_item.dart';
 import 'fainzy_store.dart';
 import 'fainzy_user.dart';
 import 'location.dart';
+import 'cart_item.dart';
 
-part 'fainzy_user_order.g.dart';
+// part 'fainzy_user_order.g.dart';
 
-@JsonSerializable(fieldRename: FieldRename.snake)
+// @JsonSerializable(fieldRename: FieldRename.snake)
 class FainzyUserOrder {
   const FainzyUserOrder({
     this.id,
@@ -29,14 +27,60 @@ class FainzyUserOrder {
     this.estimatedEta,
   });
 
-  factory FainzyUserOrder.fromJson(Map<String, dynamic> json) =>
-      _$FainzyUserOrderFromJson(json);
+  factory FainzyUserOrder.fromJson(Map<String, dynamic> json) {
+    return FainzyUserOrder(
+      id: json['id'] != null 
+          ? (json['id'] is int 
+              ? json['id'] as int 
+              : int.tryParse(json['id'].toString()))
+          : null,
+      orderId: json['order_id'] as String?,
+      code: json['code'] as String?,
+      restaurant: json['restaurant'] != null 
+          ? FainzyStore.fromJson(json['restaurant'] as Map<String, dynamic>)
+          : null,
+      deliveryLocation: json['location'] != null 
+          ? Location.fromJson(json['location'] as Map<String, dynamic>)
+          : null,
+      menu: json['menu'] != null 
+          ? List<FainzyCartItem>.from(json['menu'].map((x) => FainzyCartItem.fromJson(x)))
+          : null,
+      totalPrice: json['total_price'] != null 
+          ? (json['total_price'] as num).toDouble()
+          : null,
+      deliveryFee: json['delivery_fee'] != null 
+          ? (json['delivery_fee'] as num).toDouble()
+          : null,
+      serviceFee: json['service_fee'] != null 
+          ? (json['service_fee'] as num).toDouble()
+          : null,
+      couponDiscount: json['coupon_discount'] != null 
+          ? (json['coupon_discount'] as num).toDouble()
+          : null,
+      couponCode: json['coupon_code'] as String?,
+      status: json['status'] as String?,
+      user: json['user'] != null 
+          ? FainzyUser.fromJson(json['user'] as Map<String, dynamic>)
+          : null,
+      updated: json['updated'] != null 
+          ? DateTime.parse(json['updated'] as String)
+          : null,
+      created: json['created'] != null 
+          ? DateTime.parse(json['created'] as String)
+          : null,
+      cancellationTime: json['cancellation_time'] != null 
+          ? DateTime.parse(json['cancellation_time'] as String)
+          : null,
+      estimatedEta: json['estimated_eta'] != null 
+          ? (json['estimated_eta'] as num).toDouble()
+          : null,
+    );
+  }
 
   final int? id;
   final String? orderId;
   final String? code;
   final FainzyStore? restaurant;
-  @JsonKey(name: 'location')
   final Location? deliveryLocation;
   final List<FainzyCartItem>? menu;
   final double? totalPrice;
@@ -91,7 +135,27 @@ class FainzyUserOrder {
     );
   }
 
-  Map<String, dynamic> toJson() => _$FainzyUserOrderToJson(this);
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'order_id': orderId,
+      'code': code,
+      'restaurant': restaurant?.toJson(),
+      'location': deliveryLocation?.toJson(),
+      'menu': menu?.map((x) => x.toJson()).toList(),
+      'total_price': totalPrice,
+      'delivery_fee': deliveryFee,
+      'service_fee': serviceFee,
+      'coupon_discount': couponDiscount,
+      'coupon_code': couponCode,
+      'status': status,
+      'user': user?.toJson(),
+      'updated': updated?.toIso8601String(),
+      'created': created?.toIso8601String(),
+      'cancellation_time': cancellationTime?.toIso8601String(),
+      'estimated_eta': estimatedEta,
+    };
+  }
 
   @override
   String toString() {
@@ -146,7 +210,7 @@ class FainzyUserOrder {
   /// Convenience getters for pricing calculations
   double get subtotal {
     if (menu == null) return 0.0;
-    return menu!.fold(0.0, (sum, item) => sum + (item.price ?? 0.0));
+    return menu!.fold(0.0, (sum, item) => sum + item.totalPrice);
   }
 
   double get totalDiscount {

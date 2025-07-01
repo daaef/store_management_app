@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../theme/colors/app_colors.dart';
 import '../theme/text_styles/app_text_style.dart';
@@ -10,6 +11,7 @@ import '../helpers/order_status_helper.dart';
 import '../helpers/date_formatter.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:shimmer/shimmer.dart';
+import '../services/currency_service.dart';
 
 class OrderItemWidget extends StatelessWidget {
   const OrderItemWidget({
@@ -259,7 +261,16 @@ class OrderItemWidget extends StatelessWidget {
                 // Total Price
                 Row(
                   children: [
-                    Icon(Icons.attach_money, size: 16, color: AppColors.grey600),
+                    FutureBuilder<String>(
+                      future: CurrencyService.getCurrentCurrency(),
+                      builder: (context, snapshot) {
+                        return CurrencyService.getCurrencyIcon(
+                          currencyCode: snapshot.data,
+                          size: 16,
+                          color: AppColors.grey600,
+                        );
+                      },
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -284,21 +295,13 @@ class OrderItemWidget extends StatelessWidget {
                       Icon(Icons.restaurant_menu, size: 16, color: AppColors.grey600),
                       const SizedBox(width: 6),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            ...order.menu!.map((item) => Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Text(
-                                '${item.quantity}x ${item.menu?.name ?? 'Unknown Item'}',
-                                style: AppTextStyle.body2.copyWith(
-                                  color: AppColors.grey600,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            )).toList(),
-                          ],
+                        child: Text(
+                          _formatMenuItemsCount(order.menu!),
+                          style: AppTextStyle.body2.copyWith(
+                            color: AppColors.grey600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -329,7 +332,7 @@ class OrderItemWidget extends StatelessWidget {
                 ],
                 
                 // Order Code
-                if (order.code != null) ...[
+               /*  if (order.code != null) ...[
                   Row(
                     children: [
                       Icon(Icons.qr_code, size: 16, color: AppColors.grey600),
@@ -346,7 +349,7 @@ class OrderItemWidget extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                 ],
-                
+                 */
                 // Status at the bottom - prominent text without background
                 Text(
                   statusDisplayName.toUpperCase(),
@@ -403,9 +406,7 @@ class OrderItemWidget extends StatelessWidget {
   bool _shouldShowActionButtons(String? status) {
     // Show action buttons for orders that need merchant interaction
     return status == 'pending' || 
-           status == 'payment_processing' || 
-           status == 'confirmed' ||
-           status == 'preparing';
+           status == 'order_processing';
   }
 
   Widget _buildInlineActionButtons(BuildContext context, FainzyUserOrder order) {
@@ -450,7 +451,7 @@ class OrderItemWidget extends StatelessWidget {
               },
             ),
           ),
-        ] else if (status == 'confirmed' || status == 'preparing') ...[
+        ] else if (status == 'order_processing') ...[
           Expanded(
             child: _buildActionButton(
               context: context,
@@ -530,5 +531,47 @@ class OrderItemWidget extends StatelessWidget {
       ),
     );
     return result ?? false;
+  }
+
+  /// Calculate and format the total count of menu items in the order
+  String _formatMenuItemsCount(List menu) {
+    int totalCount = 0;
+    int totalSides = 0;
+    
+    for (final item in menu) {
+      int quantity = 1; // Default quantity if not specified
+      
+      // Handle different menu item types
+      if (item is Map<String, dynamic>) {
+        quantity = item['quantity'] as int? ?? 1;
+        
+        // Count sides
+        final sides = item['sides'] as List<dynamic>? ?? [];
+        totalSides += sides.length;
+      } else if (item.quantity != null) {
+        quantity = item.quantity!;
+        
+        // Count sides from model
+        if (item.sides != null) {
+          totalSides += (item.sides!.length as int);
+        }
+      }
+      
+      totalCount += quantity;
+    }
+    
+    // Format the count string
+    String itemText = totalCount == 1 
+        ? '1x menu item' 
+        : '${totalCount}x menu items';
+    
+    if (totalSides > 0) {
+      String sidesText = totalSides == 1 
+          ? '1 side' 
+          : '$totalSides sides';
+      return '$itemText ($sidesText)';
+    }
+    
+    return itemText;
   }
 }

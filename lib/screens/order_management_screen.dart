@@ -6,8 +6,10 @@ import '../theme/colors/app_colors.dart';
 import '../theme/text_styles/app_text_style.dart';
 import '../widgets/custom_app_bar.dart';
 import '../providers/order_provider.dart';
+import '../providers/auth_provider.dart';
 import '../models/fainzy_user_order.dart';
 import '../widgets/order_item_widget.dart';
+import '../widgets/order_notification_widget.dart';
 
 class OrderManagementScreen extends StatefulWidget {
   const OrderManagementScreen({super.key});
@@ -29,16 +31,41 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
   final TextEditingController _searchController = TextEditingController();
   int _columnCount = 3; // Default to 3 columns
 
+  // ScrollControllers for each tab to avoid PrimaryScrollController conflicts
+  late ScrollController _allOrdersController;
+  late ScrollController _pendingOrdersController;
+  late ScrollController _activeOrdersController;
+  late ScrollController _completedOrdersController;
+  late ScrollController _cancelledOrdersController;
+  late ScrollController _rejectedOrdersController;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 6, vsync: this);
+    
+    // Initialize scroll controllers
+    _allOrdersController = ScrollController();
+    _pendingOrdersController = ScrollController();
+    _activeOrdersController = ScrollController();
+    _completedOrdersController = ScrollController();
+    _cancelledOrdersController = ScrollController();
+    _rejectedOrdersController = ScrollController();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    
+    // Dispose scroll controllers
+    _allOrdersController.dispose();
+    _pendingOrdersController.dispose();
+    _activeOrdersController.dispose();
+    _completedOrdersController.dispose();
+    _cancelledOrdersController.dispose();
+    _rejectedOrdersController.dispose();
+    
     super.dispose();
   }
 
@@ -89,6 +116,14 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
             if (orderProvider.status == OrderStatus.initial) {
               orderProvider.fetchOrders();
             }
+            
+            // Initialize WebSocket connection for real-time updates
+            orderProvider.initializeWebsocketWithAuth(context);
+            
+            // Set up new order notification callback
+            orderProvider.setNewOrderCallback((order) {
+              _showNewOrderDialog(order);
+            });
           });
 
           if (orderProvider.status == OrderStatus.loading) {
@@ -189,7 +224,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                   color: AppColors.grey600,
                 ),
               ),
-              _buildConnectionStatusIndicator(orderProvider),
             ],
           ),
           
@@ -552,39 +586,49 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     return TabBarView(
       controller: _tabController,
       children: [
-        _buildOrdersList(_filterOrders(orderProvider.allOrders)),
-        _buildOrdersList(_filterOrders(orderProvider.pendingOrders)),
-        _buildOrdersList(_filterOrders(orderProvider.activeOrders)),
-        _buildOrdersList(_filterOrders(orderProvider.completedOrders)),
-        _buildOrdersList(_filterOrders(orderProvider.cancelledOrders)),
-        _buildOrdersList(_filterOrders(orderProvider.rejectedOrders)),
+        _buildOrdersList(_filterOrders(orderProvider.allOrders), _allOrdersController),
+        _buildOrdersList(_filterOrders(orderProvider.pendingOrders), _pendingOrdersController),
+        _buildOrdersList(_filterOrders(orderProvider.activeOrders), _activeOrdersController),
+        _buildOrdersList(_filterOrders(orderProvider.completedOrders), _completedOrdersController),
+        _buildOrdersList(_filterOrders(orderProvider.cancelledOrders), _cancelledOrdersController),
+        _buildOrdersList(_filterOrders(orderProvider.rejectedOrders), _rejectedOrdersController),
       ],
     );
   }
 
   List<FainzyUserOrder> _filterOrders(List<FainzyUserOrder> orders) {
-    if (_searchQuery.isEmpty) {
-      return orders;
+    List<FainzyUserOrder> filteredOrders = orders;
+    
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      filteredOrders = orders.where((order) {
+        final orderIdMatch = order.orderId?.toLowerCase().contains(query) ?? false;
+        final customerNameMatch = order.user?.name?.toLowerCase().contains(query) ?? false;
+        final orderCodeMatch = order.code?.toLowerCase().contains(query) ?? false;
+        final statusMatch = order.status?.toLowerCase().contains(query) ?? false;
+
+        return orderIdMatch || customerNameMatch || orderCodeMatch || statusMatch;
+      }).toList();
     }
-
-    final query = _searchQuery.toLowerCase();
-    return orders.where((order) {
-      final orderIdMatch = order.orderId?.toLowerCase().contains(query) ?? false;
-      final customerNameMatch = order.user?.name?.toLowerCase().contains(query) ?? false;
-      final orderCodeMatch = order.code?.toLowerCase().contains(query) ?? false;
-      final statusMatch = order.status?.toLowerCase().contains(query) ?? false;
-
-      return orderIdMatch || customerNameMatch || orderCodeMatch || statusMatch;
-    }).toList();
+    
+    // Ensure filtered orders are also sorted by creation date (latest first)
+    filteredOrders.sort((a, b) {
+      final dateA = a.created ?? DateTime.now();
+      final dateB = b.created ?? DateTime.now();
+      return dateB.compareTo(dateA); // Descending order (latest first)
+    });
+    
+    return filteredOrders;
   }
 
-  Widget _buildOrdersList(List<FainzyUserOrder> orders) {
+  Widget _buildOrdersList(List<FainzyUserOrder> orders, ScrollController scrollController) {
     if (orders.isEmpty) {
       return RefreshIndicator(
         onRefresh: () async {
           await context.read<OrderProvider>().refreshOrders();
         },
         child: SingleChildScrollView(
+          controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
           child: SizedBox(
             height: MediaQuery.of(context).size.height * 0.6,
@@ -600,19 +644,29 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
       },
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: MasonryGridView.builder(
-          gridDelegate: SliverSimpleGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: _columnCount,
+        child: Scrollbar(
+          controller: scrollController,
+          thumbVisibility: true,
+          thickness: 8.0,
+          radius: const Radius.circular(4.0),
+          child: Padding(
+            padding: const EdgeInsets.only(right: 16.0), // Add space between scrollbar and content
+            child: MasonryGridView.builder(
+              controller: scrollController,
+              gridDelegate: SliverSimpleGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: _columnCount,
+              ),
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              itemCount: orders.length,
+              itemBuilder: (context, index) {
+                return OrderItemWidget(
+                  key: ValueKey(orders[index].id),
+                  order: orders[index],
+                );
+              },
+            ),
           ),
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          itemCount: orders.length,
-          itemBuilder: (context, index) {
-            return OrderItemWidget(
-              key: ValueKey(orders[index].id),
-              order: orders[index],
-            );
-          },
         ),
       ),
     );
@@ -655,23 +709,40 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     String statusText;
     IconData statusIcon;
     bool showShimmer = false;
+    bool showReconnectButton = false;
 
     // Determine status based on connection state
-    if (orderProvider.connectionStatus.toLowerCase().contains('connecting') || 
-        orderProvider.connectionStatus.toLowerCase().contains('initializing')) {
+    final status = orderProvider.connectionStatus.toLowerCase();
+    
+    if (status.contains('connecting') || status.contains('initializing')) {
       statusColor = Colors.amber;
       statusText = 'Connecting...';
       statusIcon = Icons.wifi_tethering;
       showShimmer = true;
-    } else if (orderProvider.isWebsocketConnected && 
-               orderProvider.connectionStatus.toLowerCase().contains('connected')) {
+    } else if (status.contains('reconnecting')) {
+      statusColor = Colors.orange;
+      statusText = 'Reconnecting...';
+      statusIcon = Icons.refresh;
+      showShimmer = true;
+    } else if (orderProvider.isWebsocketConnected && status.contains('connected')) {
       statusColor = Colors.green;
-      statusText = 'Connected';
+      statusText = 'Live';
       statusIcon = Icons.wifi;
-    } else {
+    } else if (status.contains('failed') || status.contains('error')) {
       statusColor = Colors.red;
+      statusText = 'Failed';
+      statusIcon = Icons.error;
+      showReconnectButton = true;
+    } else if (status.contains('max retries')) {
+      statusColor = Colors.red;
+      statusText = 'Offline';
+      statusIcon = Icons.cloud_off;
+      showReconnectButton = true;
+    } else {
+      statusColor = Colors.grey;
       statusText = 'Disconnected';
       statusIcon = Icons.wifi_off;
+      showReconnectButton = true;
     }
 
     Widget indicator = Container(
@@ -701,6 +772,17 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
               fontWeight: FontWeight.w600,
             ),
           ),
+          if (showReconnectButton) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _handleReconnect(orderProvider),
+              child: Icon(
+                Icons.refresh,
+                color: statusColor,
+                size: 14,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -725,5 +807,62 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     }
 
     return indicator;
+  }
+
+  void _handleReconnect(OrderProvider orderProvider) {
+    // Get store ID from auth provider and force reconnect
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.isLoggedIn && authProvider.storeID.isNotEmpty) {
+      orderProvider.reconnectWebsocket(authProvider.storeID);
+      
+      // Show feedback to user
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reconnecting to live updates...'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.blue,
+        ),
+      );
+    }
+  }
+
+  /// Show dialog when a new order arrives
+  void _showNewOrderDialog(FainzyUserOrder order) {
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return OrderNotificationWidget(
+          order: order,
+          onAccept: () {
+            Navigator.of(context).pop();
+            if (order.id != null) {
+              context.read<OrderProvider>().acceptOrder(order.id!);
+            }
+          },
+          onReject: () {
+            Navigator.of(context).pop();
+            if (order.id != null) {
+              context.read<OrderProvider>().rejectOrder(order.id!);
+            }
+          },
+          onMarkReady: () {
+            Navigator.of(context).pop();
+            if (order.id != null) {
+              context.read<OrderProvider>().markOrderReady(order.id!);
+            }
+          },
+          onViewDetails: () {
+            Navigator.of(context).pop();
+            if (order.id != null) {
+              Navigator.pushNamed(
+                context,
+                '/order-details',
+                arguments: order.id,
+              );
+            }
+          },
+        );
+      },
+    );
   }
 }

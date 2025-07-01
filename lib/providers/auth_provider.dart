@@ -48,38 +48,20 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<void> _checkAuthStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    final storedStoreId = prefs.getString('storeId');
-    final storedToken = prefs.getString('apiToken') ?? prefs.getString('api_token');
-    final storedStoreID = prefs.getString('storeID');
-    final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-
+    log('🔄 Checking authentication status on app startup...');
+    
     // Fetch LastMile token on app startup (before checking auth status)
     await fetchLastMileTokenOnStartup();
 
-    if (isLoggedIn && storedStoreId != null && storedToken != null) {
-      _storeId = storedStoreId;
-      _storeID = storedStoreID ?? '';
-      _token = storedToken;
-      _authState = AuthState.authenticated;
-      // Try to load store data if available
-      final storeDataJson = prefs.getString('storeData');
-      if (storeDataJson != null) {
-        try {
-          // Parse stored store data from JSON string
-          final jsonData = json.decode(storeDataJson);
-          _storeData = StoreData.fromJson(jsonData);
-        } catch (e) {
-          log('Error parsing stored store data: $e');
-        }
-      }
-      notifyListeners();
-      
-      // Call post-authentication callback to initialize websockets
-      _postAuthCallback?.call(_storeID);
-    } else {
+    // Validate stored token with server
+    final isValidToken = await validateStoredToken();
+    
+    if (!isValidToken) {
+      log('❌ Stored token is invalid or missing');
       _authState = AuthState.unauthenticated;
       notifyListeners();
+    } else {
+      log('✅ Authentication status check completed successfully');
     }
   }
 
@@ -120,6 +102,7 @@ class AuthProvider with ChangeNotifier {
     }
 
     try {
+      log('🔄 Starting login process for store: $storeId');
       _authState = AuthState.authenticating;
       notifyListeners();
 
@@ -127,6 +110,8 @@ class AuthProvider with ChangeNotifier {
       
       if (response.status == 'success') {
         final prefs = await SharedPreferences.getInstance();
+        
+        log('✅ Login API call successful');
         
         // Save authentication data
         await prefs.setBool('isLoggedIn', true);
@@ -153,30 +138,29 @@ class AuthProvider with ChangeNotifier {
         if (response.data['subentity'] != null) {
           final subentityData = response.data['subentity'] as Map<String, dynamic>;
 
+          log('🏪 Processing store data from login response');
           _storeData = _mapSubentityToStoreData(subentityData);
           await prefs.setString('storeData', jsonEncode(_storeData!.toJson()));
         }
         
         notifyListeners();
         
-        // Set OneSignal external user ID for push notifications
-        await NotificationHelper.setExternalUserId(_storeID);
-        await NotificationHelper.sendTag('store_id', _storeID);
-        await NotificationHelper.sendTag('store_name', _storeData?.name ?? 'Unknown Store');
+        // Initialize post-authentication services
+        await _initializePostAuthServices();
         
-        // Call post-authentication callback to initialize websockets
-        _postAuthCallback?.call(_storeID);
-        
+        log('🎉 Login completed successfully');
         return true;
       } else {
         _error = response.message ?? 'Authentication failed';
         _authState = AuthState.error;
+        log('❌ Login failed: $_error');
         notifyListeners();
         return false;
       }
     } catch (e) {
       _error = 'Login failed: $e';
       _authState = AuthState.error;
+      log('❌ Login error: $e');
       notifyListeners();
       return false;
     }
@@ -247,6 +231,137 @@ class AuthProvider with ChangeNotifier {
     
     final newToken = prefs.getString('LastMileApiToken');
     return newToken != null && newToken.isNotEmpty;
+  }
+
+  /// Validate stored token with server
+  Future<bool> validateStoredToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final storedStoreId = prefs.getString('storeId');
+      final storedToken = prefs.getString('apiToken') ?? prefs.getString('api_token');
+      final storedStoreID = prefs.getString('storeID');
+      final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+
+      log('🔍 Validating stored token...');
+      log('  - Store ID: $storedStoreId');
+      log('  - Token exists: ${storedToken != null}');
+      log('  - Store ID (internal): $storedStoreID');
+      log('  - Is logged in flag: $isLoggedIn');
+
+      // If no token or credentials, token is invalid
+      if (!isLoggedIn || storedStoreId == null || storedToken == null) {
+        log('❌ Token validation failed: Missing credentials');
+        _authState = AuthState.unauthenticated;
+        notifyListeners();
+        return false;
+      }
+
+      // Validate token with server by making a test API call
+      log('🔄 Making test API call to validate token...');
+      final ApiResponse response = await _apiClient.authenticateStore(storeId: storedStoreId);
+      
+      if (response.status == 'success') {
+        log('✅ Token validation successful: Server confirmed authentication');
+        
+        // Update auth state and store data if needed
+        _storeId = storedStoreId;
+        _storeID = storedStoreID ?? '';
+        _token = storedToken;
+        _authState = AuthState.authenticated;
+        
+        // Update store data from response if available
+        if (response.data != null && response.data['subentity'] != null) {
+          final subentityData = response.data['subentity'];
+          _storeData = _mapSubentityToStoreData(subentityData);
+          await prefs.setString('storeData', jsonEncode(_storeData!.toJson()));
+        }
+        
+        notifyListeners();
+        
+        // Initialize post-auth services
+        await _initializePostAuthServices();
+        
+        return true;
+      } else {
+        log('❌ Token validation failed: Server rejected token');
+        log('  - Response status: ${response.status}');
+        log('  - Response message: ${response.message}');
+        
+        // Token is invalid, clear stored data
+        await _clearInvalidTokenData();
+        return false;
+      }
+    } catch (e) {
+      log('❌ Token validation error: $e');
+      
+      // If there's a network error or other issue, assume token might still be valid
+      // but mark as unauthenticated for safety
+      _authState = AuthState.unauthenticated;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Clear invalid token data from storage
+  Future<void> _clearInvalidTokenData() async {
+    log('🧹 Clearing invalid token data...');
+    final prefs = await SharedPreferences.getInstance();
+    
+    await prefs.remove('isLoggedIn');
+    await prefs.remove('storeId');
+    await prefs.remove('apiToken');
+    await prefs.remove('api_token');
+    await prefs.remove('storeID');
+    await prefs.remove('storeData');
+    
+    _storeId = '';
+    _storeID = '';
+    _token = '';
+    _storeData = null;
+    _authState = AuthState.unauthenticated;
+    notifyListeners();
+    
+    log('✅ Invalid token data cleared');
+  }
+
+  /// Initialize post-authentication services
+  Future<void> _initializePostAuthServices() async {
+    try {
+      log('🚀 Initializing post-authentication services...');
+      
+      // Set OneSignal external user ID for push notifications
+      await NotificationHelper.setExternalUserId(_storeID);
+      await NotificationHelper.sendTag('store_id', _storeID);
+      await NotificationHelper.sendTag('store_name', _storeData?.name ?? 'Unknown Store');
+      
+      // Call post-authentication callback to initialize websockets
+      _postAuthCallback?.call(_storeID);
+      
+      log('✅ Post-authentication services initialized');
+    } catch (e) {
+      log('⚠️ Error initializing post-auth services: $e');
+      // Don't fail the entire auth process for post-auth service errors
+    }
+  }
+
+  /// Re-validate token when app resumes from background
+  Future<bool> revalidateTokenOnResume() async {
+    log('🔄 Re-validating token on app resume...');
+    
+    if (!isLoggedIn) {
+      log('ℹ️ No active session to validate');
+      return false;
+    }
+    
+    final isValid = await validateStoredToken();
+    
+    if (!isValid) {
+      log('⚠️ Token expired or invalid - user needs to re-login');
+      _authState = AuthState.unauthenticated;
+      notifyListeners();
+    }
+    
+    return isValid;
   }
 
   /// Maps subentity data from API response to StoreData model

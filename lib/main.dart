@@ -1,18 +1,23 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:store_management_app/providers/auth_provider.dart';
-import 'package:store_management_app/providers/menu_provider.dart';
 import 'package:store_management_app/providers/navigation_provider.dart';
 import 'package:store_management_app/providers/order_provider.dart';
 import 'package:store_management_app/providers/store_provider.dart';
+import 'package:store_management_app/providers/menu_provider.dart';
 import 'package:store_management_app/providers/store_setup_provider.dart';
-import 'package:store_management_app/repositories/menu_repository.dart';
+import 'package:store_management_app/services/api_service.dart';
 import 'package:store_management_app/services/fainzy_api_client.dart';
 import 'package:store_management_app/routing/app_router.dart';
 import 'package:store_management_app/screens/splash_screen.dart';
 import 'package:store_management_app/helpers/notification_helper.dart';
+import 'package:store_management_app/helpers/app_lifecycle_manager.dart';
+import 'package:store_management_app/helpers/token_validation_helper.dart';
+import 'package:store_management_app/services/currency_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,7 +28,10 @@ void main() async {
   // Initialize OneSignal notifications
   await NotificationHelper.initialize();
   
-  print('🚀 Store Management App starting...');
+  // Initialize currency service
+  await CurrencyService.initialize();
+  
+  log('🚀 Store Management App starting...');
 
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
@@ -49,23 +57,22 @@ void main() async {
         Provider<FainzyApiClient>(
           create: (_) => FainzyApiClient(),
         ),
-        Provider<MenuRepository>(
-          create: (context) => MenuRepository(context.read<FainzyApiClient>()),
+        Provider<ApiService>(
+          create: (_) => ApiService(),
         ),
         
         // Providers
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => StoreProvider()),
         ChangeNotifierProvider(create: (_) => OrderProvider()),
-        ChangeNotifierProvider(
-          create: (context) => MenuProvider(
-            menuRepository: context.read<MenuRepository>(),
-          ),
-        ),
+        ChangeNotifierProvider(create: (_) => OrderProvider()),
         ChangeNotifierProvider(create: (_) => NavigationProvider()),
+        ChangeNotifierProvider(create: (_) => MenuProvider()),
         ChangeNotifierProvider(create: (_) => StoreSetupProvider()),
       ],
-      child: const AppWithWebsocketListener(),
+      child: AppLifecycleManager(
+        child: const AppWithWebsocketListener(),
+      ),
     ),
   );
 }
@@ -91,17 +98,23 @@ class _AppWithWebsocketListenerState extends State<AppWithWebsocketListener> {
       authProvider.setPostAuthCallback((storeID) {
         if (storeID.isNotEmpty) {
           orderProvider.initializeWebsocket(storeID);
+          // Start periodic token validation when user is authenticated
+          TokenValidationHelper.instance.startPeriodicValidation(context);
         }
       });
       
       // Set up callback for logout to clear order data
       authProvider.setLogoutCallback(() {
         orderProvider.clearData();
+        // Stop token validation when user logs out
+        TokenValidationHelper.instance.stopPeriodicValidation();
       });
       
       // Initialize websocket if already authenticated
       if (authProvider.isLoggedIn && authProvider.storeID.isNotEmpty) {
         orderProvider.initializeWebsocket(authProvider.storeID);
+        // Start token validation for already authenticated users
+        TokenValidationHelper.instance.startPeriodicValidation(context);
       }
     });
   }

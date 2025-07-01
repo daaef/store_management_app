@@ -1,9 +1,5 @@
 import 'package:equatable/equatable.dart';
-import 'package:json_annotation/json_annotation.dart';
 
-part 'location.g.dart';
-
-@JsonSerializable()
 class GpsCoordinates extends Equatable {
   final String type;
   final List<double> coordinates;
@@ -12,7 +8,7 @@ class GpsCoordinates extends Equatable {
     required this.type,
     required this.coordinates,
   });
-
+ 
   // Convenience getters for backward compatibility
   double get longitude => coordinates.isNotEmpty ? coordinates[0] : 0.0;
   double get latitude => coordinates.length > 1 ? coordinates[1] : 0.0;
@@ -25,10 +21,19 @@ class GpsCoordinates extends Equatable {
     );
   }
 
-  factory GpsCoordinates.fromJson(Map<String, dynamic> json) =>
-      _$GpsCoordinatesFromJson(json);
+  factory GpsCoordinates.fromJson(Map<String, dynamic> json) {
+    return GpsCoordinates(
+      type: json['type'] ?? 'Point',
+      coordinates: List<double>.from(json['coordinates'] ?? []),
+    );
+  }
 
-  Map<String, dynamic> toJson() => _$GpsCoordinatesToJson(this);
+  Map<String, dynamic> toJson() {
+    return {
+      'type': type,
+      'coordinates': coordinates,
+    };
+  }
 
   @override
   List<Object?> get props => [type, coordinates];
@@ -39,23 +44,17 @@ class GpsCoordinates extends Equatable {
   }
 }
 
-@JsonSerializable()
 class Location extends Equatable {
   final String? name;
   final String? country;
-  @JsonKey(name: 'post_code')
   final String? postCode;
   final String? state;
   final String? city;
   final String? ward;
   final String? village;
-  @JsonKey(name: 'location_type')
   final String? locationType;
-  @JsonKey(name: 'gps_cordinates')
   final GpsCoordinates? gpsCoordinates;
-  @JsonKey(name: 'address_details')
   final String? addressDetails;
-  @JsonKey(name: 'service_area')
   final int? serviceArea;
 
   // Additional convenience getters
@@ -80,10 +79,43 @@ class Location extends Equatable {
     return 'Location(name: $name, country: $country, postCode: $postCode, state: $state, city: $city, ward: $ward, village: $village, locationType: $locationType, gpsCoordinates: $gpsCoordinates, addressDetails: $addressDetails, serviceArea: $serviceArea)';
   }
 
-  factory Location.fromJson(Map<String, dynamic> json) =>
-      _$LocationFromJson(json);
+  factory Location.fromJson(Map<String, dynamic> json) {
+    return Location(
+      name: json['name'] as String?,
+      country: json['country'] as String?,
+      postCode: json['post_code'] as String?,
+      state: json['state'] as String?,
+      city: json['city'] as String?,
+      ward: json['ward'] as String?,
+      village: json['village'] as String?,
+      locationType: json['location_type'] as String?,
+      gpsCoordinates: json['gps_coordinates'] != null 
+          ? GpsCoordinates.fromJson(json['gps_coordinates'] as Map<String, dynamic>)
+          : null,
+      addressDetails: json['address_details'] as String?,
+      serviceArea: json['service_area'] != null 
+          ? (json['service_area'] is int 
+              ? json['service_area'] as int 
+              : int.tryParse(json['service_area'].toString()))
+          : null,
+    );
+  }
 
-  Map<String, dynamic> toJson() => _$LocationToJson(this);
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'country': country,
+      'post_code': postCode,
+      'state': state,
+      'city': city,
+      'ward': ward,
+      'village': village,
+      'location_type': locationType,
+      'gps_coordinates': gpsCoordinates?.toJson(),
+      'address_details': addressDetails,
+      'service_area': serviceArea,
+    };
+  }
 
   Location copyWith({
     String? name,

@@ -1,21 +1,11 @@
-import 'package:json_annotation/json_annotation.dart';
-
-part 'order_statistics.g.dart';
-
-@JsonSerializable()
 class OrderStatistics {
   final int? id;
   final DateTime? created;
   final DateTime? modified;
-  @JsonKey(name: 'subentity_id')
   final int? subentityId;
-  @JsonKey(name: 'total_orders')
   final int? totalOrders;
-  @JsonKey(name: 'total_pending_orders')
   final int? totalPendingOrders;
-  @JsonKey(name: 'total_completed_orders')
   final int? totalCompletedOrders;
-  @JsonKey(name: 'total_revenue')
   final double? totalRevenue;
 
   const OrderStatistics({
@@ -51,10 +41,31 @@ class OrderStatistics {
     );
   }
 
-  factory OrderStatistics.fromJson(Map<String, dynamic> json) =>
-      _$OrderStatisticsFromJson(json);
+  factory OrderStatistics.fromJson(Map<String, dynamic> json) {
+    return OrderStatistics(
+      id: json['id'],
+      created: json['created'] != null ? DateTime.parse(json['created']) : null,
+      modified: json['modified'] != null ? DateTime.parse(json['modified']) : null,
+      subentityId: json['subentity_id'],
+      totalOrders: json['total_orders'],
+      totalPendingOrders: json['total_pending_orders'],
+      totalCompletedOrders: json['total_completed_orders'],
+      totalRevenue: json['total_revenue']?.toDouble(),
+    );
+  }
 
-  Map<String, dynamic> toJson() => _$OrderStatisticsToJson(this);
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'created': created?.toIso8601String(),
+      'modified': modified?.toIso8601String(),
+      'subentity_id': subentityId,
+      'total_orders': totalOrders,
+      'total_pending_orders': totalPendingOrders,
+      'total_completed_orders': totalCompletedOrders,
+      'total_revenue': totalRevenue,
+    };
+  }
 
   @override
   String toString() {

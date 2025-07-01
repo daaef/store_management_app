@@ -21,7 +21,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _initializeApp() async {
     // Add a small delay to show the splash screen
-    await Future.delayed(const Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 1));
 
     if (!mounted) return;
 
@@ -33,34 +33,64 @@ class _SplashScreenState extends State<SplashScreen> {
 
     final bool seenOnboarding = prefs.getBool('seenOnboarding') ?? false;
 
-    // Check authentication status
-    if (authProvider.isLoggedIn) {
-      // User is logged in, check if store setup is completed
+    print('🔍 SPLASH: Waiting for authentication validation to complete...');
+    
+    // Wait for the auth provider to finish its initial validation
+    // This ensures we have accurate authentication status
+    int attempts = 0;
+    const maxAttempts = 10; // Max 5 seconds wait
+    
+    while (authProvider.authState == AuthState.initial && attempts < maxAttempts) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      attempts++;
+      print('🔄 SPLASH: Waiting for auth validation... attempt $attempts');
+    }
+
+    print('🔍 SPLASH: Authentication validation completed');
+    print('  - Auth provider isLoggedIn: ${authProvider.isLoggedIn}');
+    print('  - Auth state: ${authProvider.authState}');
+    print('  - Store data available: ${authProvider.storeData != null}');
+    print('  - Store setup status: ${authProvider.storeData?.isSetup}');
+    print('  - Seen onboarding: $seenOnboarding');
+
+    // Check if user has valid token and is authenticated
+    if (authProvider.isLoggedIn && authProvider.authState == AuthState.authenticated) {
+      print('✅ SPLASH: User is authenticated with valid token');
+      
+      // Check if store setup is completed
       if (authProvider.storeData != null && authProvider.storeData!.isSetup == true) {
-        // Store is set up, go to main app
+        print('🏪 SPLASH: Store setup completed - navigating to home feed');
+        // Store is set up, go to main app (home feed)
         AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
           Routes.routeRoot,
           (route) => false,
         );
       } else {
+        print('⚙️ SPLASH: Store setup incomplete - navigating to setup');
         // Store is not set up, go to store setup
         AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
           Routes.routeStoreSetup,
           (route) => false,
         );
       }
-    } else if (seenOnboarding) {
-      // User has seen onboarding but is not logged in
-      AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
-        Routes.routeLogin,
-        (route) => false,
-      );
     } else {
-      // First time user, show onboarding
-      AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
-        Routes.routeOnboarding,
-        (route) => false,
-      );
+      print('❌ SPLASH: User not authenticated or invalid token');
+      
+      if (seenOnboarding) {
+        print('📱 SPLASH: Onboarding seen - navigating to login');
+        // User has seen onboarding but is not logged in
+        AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+          Routes.routeLogin,
+          (route) => false,
+        );
+      } else {
+        print('👋 SPLASH: First time user - navigating to onboarding');
+        // First time user, show onboarding
+        AppRouter.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+          Routes.routeOnboarding,
+          (route) => false,
+        );
+      }
     }
   }
 

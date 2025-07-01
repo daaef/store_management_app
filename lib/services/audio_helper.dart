@@ -1,147 +1,168 @@
 import 'dart:developer';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/material.dart';
 
+/// Audio helper for playing order notification sounds (matches last_mile_store exactly)
 class AudioHelper {
-  AudioHelper._();
+  // Map to track audio players for each order (matches last_mile_store)
+  static final Map<int, AudioPlayer> _orderAudioPlayers = {};
   
-  static final AudioHelper instance = AudioHelper._();
+  // Language support (matches last_mile_store)
+  static String _language = 'ENG';
   
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  /// Set audio language based on locale (matches last_mile_store)
+  static void setLanguage(Locale locale) {
+    if (locale.languageCode == 'en') {
+      _language = 'ENG';
+    } else if (locale.languageCode == 'ja') {
+      _language = 'JAP';
+    }
+    log('🌐 Audio language set to: $_language for locale: ${locale.languageCode}');
+  }
   
-  // Map to track playing sounds for each order
-  final Map<int, AudioPlayer> _playingSounds = {};
-  
-  /// Play notification sound for new order
-  Future<void> playNewOrderSound(int orderId) async {
+  /// Play notification sound for new order (matches last_mile_store flow)
+  static Future<void> playNewOrderSound(int orderId) async {
     try {
-      log('AudioHelper: Playing new order sound for order $orderId');
-      
-      // Stop any existing sound for this order
-      await stopSound(orderId);
-      
-      // Create new player for this order
-      final player = AudioPlayer();
-      _playingSounds[orderId] = player;
-      
-      // Set to loop for attention
-      await player.setReleaseMode(ReleaseMode.loop);
-      
-      // Try to play from assets, fallback to default system sound
-      try {
-        await player.play(AssetSource('sounds/accept_order_ENG.wav'));
-      } catch (e) {
-        log('AudioHelper: Asset sound not found, using default notification sound');
-        // If asset doesn't exist, we could use a system beep or generate a tone
-        // For now, just log that it would play
-        log('AudioHelper: Would play new order notification sound');
+      log('🔊 Attempting to play new order sound for order $orderId');
+
+      // If a sound is already playing for this order, stop it.
+      if (_orderAudioPlayers.containsKey(orderId) &&
+          _orderAudioPlayers[orderId]!.state == PlayerState.playing) {
+        log('🛑 Stopping existing sound for order $orderId');
+        await stopSound(orderId);
       }
-    } catch (e) {
-      log('AudioHelper: Error playing new order sound - $e');
+
+      // Create a new AudioPlayer for this order.
+      AudioPlayer orderPlayer = AudioPlayer();
+      _orderAudioPlayers[orderId] = orderPlayer;
+
+      final soundFile = 'sounds/accept_order_$_language.wav';
+      log('🎵 Playing sound file: $soundFile');
+
+      // Add listeners to monitor playback state
+      orderPlayer.onPlayerStateChanged.listen((PlayerState state) {
+        log('🎵 Audio player state changed to: $state for order $orderId');
+      });
+
+      orderPlayer.onPlayerComplete.listen((_) {
+        log('🎵 Audio playback completed for order $orderId');
+      });
+
+      // Set audio configuration for better reliability (matches last_mile_store)
+      await orderPlayer.setReleaseMode(ReleaseMode.loop);
+      await orderPlayer.setVolume(1.0); // Ensure volume is at maximum
+      
+      await orderPlayer.play(AssetSource(soundFile));
+      
+      log('✅ Successfully started playing sound for order $orderId');
+    } catch (e, stackTrace) {
+      log('❌ Error playing new order sound for order $orderId: $e');
+      log('Stack trace: $stackTrace');
     }
   }
   
-  /// Play sound when payment is confirmed and order should be prepared
-  Future<void> playPaymentConfirmedSound(int orderId) async {
+  /// Play sound when robot arrives for pickup (matches last_mile_store)
+  static Future<void> playRobotArrivedSound(int orderId) async {
     try {
-      log('AudioHelper: Playing payment confirmed sound for order $orderId');
+      log('🤖 Playing robot arrived sound for order $orderId');
       
-      // Stop any existing sound for this order
-      await stopSound(orderId);
-      
-      // Create new player for this order
-      final player = AudioPlayer();
-      _playingSounds[orderId] = player;
-      
-      // Play once for payment confirmation
-      await player.setReleaseMode(ReleaseMode.stop);
-      
-      try {
-        await player.play(AssetSource('sounds/payment_confirmed.mp3'));
-      } catch (e) {
-        log('AudioHelper: Asset sound not found, using default payment sound');
-        log('AudioHelper: Would play payment confirmed sound');
+      if (_orderAudioPlayers.containsKey(orderId) &&
+          _orderAudioPlayers[orderId]!.state == PlayerState.playing) {
+        await stopSound(orderId);
       }
+
+      // Create a new AudioPlayer for this order.
+      AudioPlayer orderPlayer = AudioPlayer();
+      _orderAudioPlayers[orderId] = orderPlayer;
+
+      int playCount = 0;
+      orderPlayer.onPlayerComplete.listen((event) async {
+        if (playCount < 1) {
+          playCount++;
+          await orderPlayer.play(
+              AssetSource('sounds/robot_arrived_for_pickup_$_language.wav'));
+        } else {
+          await stopSound(orderId);
+        }
+      });
+
+      await orderPlayer
+          .play(AssetSource('sounds/robot_arrived_for_pickup_$_language.wav'));
+      
+      log('✅ Successfully started robot arrived sound for order $orderId');
     } catch (e) {
-      log('AudioHelper: Error playing payment confirmed sound - $e');
+      log('❌ Error playing robot arrived sound for order $orderId: $e');
     }
   }
   
-  /// Play sound when delivery person/robot arrives for pickup
-  Future<void> playPickupArrivedSound(int orderId) async {
+  /// Play sound when payment is confirmed (matches last_mile_store)
+  static Future<void> playPaymentConfirmedSound(int orderId) async {
     try {
-      log('AudioHelper: Playing pickup arrived sound for order $orderId');
+      log('💳 Playing payment confirmed sound for order $orderId');
       
-      // Stop any existing sound for this order
-      await stopSound(orderId);
-      
-      // Create new player for this order
-      final player = AudioPlayer();
-      _playingSounds[orderId] = player;
-      
-      // Set to loop for attention
-      await player.setReleaseMode(ReleaseMode.loop);
-      
-      try {
-        await player.play(AssetSource('sounds/pickup_arrived.mp3'));
-      } catch (e) {
-        log('AudioHelper: Asset sound not found, using default pickup sound');
-        log('AudioHelper: Would play pickup arrived sound');
+      if (_orderAudioPlayers.containsKey(orderId) &&
+          _orderAudioPlayers[orderId]!.state == PlayerState.playing) {
+        await stopSound(orderId);
       }
+
+      // Create a new AudioPlayer for this order.
+      AudioPlayer orderPlayer = AudioPlayer();
+      _orderAudioPlayers[orderId] = orderPlayer;
+
+      await orderPlayer
+          .play(AssetSource('sounds/payment_confirmed_$_language.mp3'));
+      
+      log('✅ Successfully started payment confirmed sound for order $orderId');
     } catch (e) {
-      log('AudioHelper: Error playing pickup arrived sound - $e');
+      log('❌ Error playing payment confirmed sound for order $orderId: $e');
     }
   }
   
-  /// Stop sound for specific order
-  Future<void> stopSound(int orderId) async {
+  /// Stop sound for specific order (matches last_mile_store)
+  static Future<void> stopSound(int orderId) async {
     try {
-      final player = _playingSounds[orderId];
-      if (player != null) {
-        await player.stop();
-        await player.dispose();
-        _playingSounds.remove(orderId);
-        log('AudioHelper: Stopped sound for order $orderId');
+      if (_orderAudioPlayers.containsKey(orderId)) {
+        await _orderAudioPlayers[orderId]!.stop();
+        await _orderAudioPlayers[orderId]!.dispose();
+        _orderAudioPlayers.remove(orderId);
+        log('🛑 Stopped and disposed sound for order $orderId');
       }
     } catch (e) {
-      log('AudioHelper: Error stopping sound for order $orderId - $e');
+      log('❌ Error stopping sound for order $orderId: $e');
     }
   }
   
   /// Stop all playing sounds
-  Future<void> stopAllSounds() async {
+  static Future<void> stopAllSounds() async {
     try {
-      log('AudioHelper: Stopping all sounds');
+      log('🛑 Stopping all sounds');
       
-      for (final player in _playingSounds.values) {
-        await player.stop();
-        await player.dispose();
+      for (final entry in _orderAudioPlayers.entries) {
+        await entry.value.stop();
+        await entry.value.dispose();
       }
-      _playingSounds.clear();
+      _orderAudioPlayers.clear();
       
-      log('AudioHelper: All sounds stopped');
+      log('✅ All sounds stopped and disposed');
     } catch (e) {
-      log('AudioHelper: Error stopping all sounds - $e');
+      log('❌ Error stopping all sounds: $e');
     }
   }
-  
-  /// Play a simple beep sound for UI feedback
-  Future<void> playActionSound() async {
+
+  /// Test method to manually trigger audio playback (matches last_mile_store)
+  static Future<void> testAudioPlayback() async {
+    log('🧪 Testing audio playback...');
     try {
-      final player = AudioPlayer();
-      await player.play(AssetSource('sounds/action_beep.mp3'));
+      AudioPlayer testPlayer = AudioPlayer();
+      await testPlayer.play(AssetSource('sounds/accept_order_$_language.wav'));
+      log('✅ Test audio playback successful');
       
-      // Auto-dispose after playing
-      player.onPlayerComplete.listen((_) {
-        player.dispose();
+      // Auto-dispose after testing
+      testPlayer.onPlayerComplete.listen((_) {
+        testPlayer.dispose();
       });
     } catch (e) {
-      log('AudioHelper: Error playing action sound - $e');
+      log('❌ Test audio playbook failed: $e');
     }
-  }
-  
-  /// Dispose all resources
-  Future<void> dispose() async {
-    await stopAllSounds();
-    await _audioPlayer.dispose();
   }
 }

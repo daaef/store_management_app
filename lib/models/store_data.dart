@@ -253,7 +253,7 @@ class GpsCoordinatesData extends Equatable {
   }
 
   double get latitude => coordinates.length > 1 ? coordinates[1] : 0.0;
-  double get longitude => coordinates.length > 0 ? coordinates[0] : 0.0;
+  double get longitude => coordinates.isNotEmpty ? coordinates[0] : 0.0;
 
   @override
   List<Object?> get props => [type, coordinates];

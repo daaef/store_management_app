@@ -9,6 +9,7 @@ import '../services/order_service.dart';
 import '../services/fainzy_api_client.dart';
 import '../services/lastmile_api_client.dart';
 import '../services/websocket_service.dart';
+import '../services/audio_helper.dart';
 import 'auth_provider.dart';
 
 enum OrderStatus { initial, loading, success, error }
@@ -48,6 +49,16 @@ class OrderProvider with ChangeNotifier {
   // WebSocket connection status
   String _connectionStatus = 'Disconnected';
 
+  // Notification callback for showing dialogs
+  Function(FainzyUserOrder)? _onNewOrderCallback;
+
+  // Set of orders that have already been notified to prevent duplicate notifications
+  final Set<int> _notifiedOrders = {};
+
+  // Track existing orders for audio notifications (matches last_mile_store pattern)
+  List<int> _existingOrders = [];
+  String _lastStatus = '';
+
   // Batch operation support
   bool _isBatchOperation = false;
   List<int> _selectedOrderIds = [];
@@ -63,6 +74,11 @@ class OrderProvider with ChangeNotifier {
   List<FainzyUserOrder> get pastOrders => _pastOrders;
   OrderStatistics? get orderStatistics => _orderStatistics;
   FainzyUserOrder? get selectedOrder => _selectedOrder;
+  
+  // Additional getters for specific order statuses
+  List<FainzyUserOrder> get completedOrders => _allOrders.where((order) => order.status == 'completed').toList();
+  List<FainzyUserOrder> get cancelledOrders => _allOrders.where((order) => order.status == 'cancelled').toList();
+  List<FainzyUserOrder> get rejectedOrders => _allOrders.where((order) => order.status == 'rejected').toList();
   
   bool get isLoading => _status == OrderStatus.loading;
   bool get isUpdating => _actionStatus == OrderActionStatus.updating;
@@ -87,28 +103,110 @@ class OrderProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Play notification sound for new orders
-  Future<void> _playNewOrderSound() async {
+  /// Set callback for showing new order notifications
+  void setNewOrderCallback(Function(FainzyUserOrder)? callback) {
+    _onNewOrderCallback = callback;
+  }
+
+  /// Play notification sound for new orders (matches last_mile_store pattern)
+  Future<void> _playNewOrderSound(int orderId) async {
     if (!_soundNotificationsEnabled) return;
     
     try {
-      // Play system sound for new order notification
-      await SystemSound.play(SystemSoundType.alert);
-      log('OrderProvider: Played new order notification sound');
+      log('🔊 Triggering audio for new order $orderId');
+      await AudioHelper.playNewOrderSound(orderId);
+      log('OrderProvider: Played new order notification sound for order $orderId');
     } catch (e) {
-      log('OrderProvider: Error playing notification sound - $e');
+      log('OrderProvider: Error playing new order sound for order $orderId - $e');
+      try {
+        // Fallback to system sound
+        await SystemSound.play(SystemSoundType.alert);
+        log('OrderProvider: Played fallback system notification sound');
+      } catch (systemError) {
+        log('OrderProvider: Error playing system notification sound - $systemError');
+      }
+    }
+  }
+
+  /// Play sound when payment is confirmed (matches last_mile_store pattern)
+  Future<void> _playPaymentConfirmedSound(int orderId) async {
+    if (!_soundNotificationsEnabled) return;
+    
+    try {
+      log('💳 Playing payment confirmed sound for order $orderId');
+      await AudioHelper.playPaymentConfirmedSound(orderId);
+      log('OrderProvider: Played payment confirmed sound for order $orderId');
+    } catch (e) {
+      log('OrderProvider: Error playing payment confirmed sound for order $orderId - $e');
+    }
+  }
+
+  /// Play sound when robot arrives for pickup (matches last_mile_store pattern)
+  Future<void> _playRobotArrivedSound(int orderId) async {
+    if (!_soundNotificationsEnabled) return;
+    
+    try {
+      log('🤖 Playing robot arrived sound for order $orderId');
+      await AudioHelper.playRobotArrivedSound(orderId);
+      log('OrderProvider: Played robot arrived sound for order $orderId');
+    } catch (e) {
+      log('OrderProvider: Error playing robot arrived sound for order $orderId - $e');
+    }
+  }
+
+  /// Stop sound for specific order (matches last_mile_store pattern)
+  Future<void> _stopOrderSound(int orderId) async {
+    try {
+      await AudioHelper.stopSound(orderId);
+      log('🛑 Stopped sound for order $orderId');
+    } catch (e) {
+      log('OrderProvider: Error stopping sound for order $orderId - $e');
+    }
+  }
+
+  /// Show notification dialog for new orders
+  void _showNewOrderNotification(FainzyUserOrder order) {
+    if (order.id == null || _notifiedOrders.contains(order.id)) {
+      return; // Already notified for this order
+    }
+    
+    // Show notification and play sounds for different order statuses
+    final status = order.status?.toLowerCase() ?? '';
+    
+    if (status == 'pending') {
+      log('OrderProvider: Showing notification for new pending order ${order.id}');
+      _notifiedOrders.add(order.id!);
+      _onNewOrderCallback?.call(order);
+    } else if (status == 'robot_arrived_for_pickup') {
+      log('OrderProvider: Robot arrived for pickup order ${order.id}');
+      _notifiedOrders.add(order.id!);
+      _playRobotArrivedSound(order.id!);
+      _onNewOrderCallback?.call(order);
+    } else if (status == 'order_processing') {
+      log('OrderProvider: Payment confirmed for order ${order.id}');
+      _notifiedOrders.add(order.id!);
+      _playPaymentConfirmedSound(order.id!);
+      _onNewOrderCallback?.call(order);
     }
   }
 
   /// Initialize websocket connection for real-time order updates
   void initializeWebsocket(String storeID) {
-    if (_isWebsocketInitialized || storeID.isEmpty) return;
+    if (_isWebsocketInitialized || storeID.isEmpty) {
+      log('OrderProvider: WebSocket already initialized or invalid store ID');
+      return;
+    }
     
     try {
       log('OrderProvider: Initializing websocket for store ID: $storeID...');
       
+      // Clean up any existing connections first
+      _cleanupWebsocketConnections();
+      
       // Use WebSocketService to connect to the order updates endpoint
-      final wsUrl = 'wss://lastmile.fainzy.tech/ws/soc/store_$storeID/'; // Replace with actual URL
+      final wsUrl = 'wss://lastmile.fainzy.tech/ws/soc/store_$storeID/';
+      log('OrderProvider: Connecting to WebSocket URL: $wsUrl');
+      
       _webSocketService.connect(wsUrl);
       _subscribeToOrderUpdates();
       _subscribeToConnectionStatus();
@@ -117,7 +215,17 @@ class OrderProvider with ChangeNotifier {
       log('OrderProvider: Websocket initialized successfully for store ID: $storeID');
     } catch (e) {
       log('OrderProvider: Error initializing websocket - $e');
+      _isWebsocketInitialized = false;
     }
+  }
+
+  /// Clean up existing WebSocket connections
+  void _cleanupWebsocketConnections() {
+    log('OrderProvider: Cleaning up existing WebSocket connections');
+    _orderStreamSubscription?.cancel();
+    _connectionStatusSubscription?.cancel();
+    _orderStreamSubscription = null;
+    _connectionStatusSubscription = null;
   }
 
   /// Initialize websocket using AuthProvider for store ID
@@ -164,64 +272,64 @@ class OrderProvider with ChangeNotifier {
   /// Handle order updates received from websocket
   void _handleWebsocketOrderUpdate(Map<String, dynamic> orderData) {
     try {
-      log('OrderProvider: Processing websocket order data: $orderData');
+      log('OrderProvider: Processing websocket order data: ${orderData['id']} with status: ${orderData['status']}');
       
       // Check if this is a valid order update
       if (!orderData.containsKey('id') && !orderData.containsKey('order_id')) {
         log('OrderProvider: Invalid order data from websocket - missing ID field');
         return;
       }
-      
-      // Handle different websocket event types
-      final eventType = orderData['type'] ?? orderData['event_type'] ?? 'order_update';
-      log('OrderProvider: Websocket event type: $eventType');
-      
-      // If this is just a notification, trigger a refresh of all orders
-      if (eventType == 'order_notification' || eventType == 'new_order' || eventType == 'order_status_changed') {
-        log('OrderProvider: Received order notification, refreshing all orders...');
+
+      // Try to parse as a complete order object first
+      try {
+        final updatedOrder = FainzyUserOrder.fromJson(orderData);
         
-        // Play sound notification for new orders
-        if (eventType == 'new_order' || eventType == 'order_notification') {
-          _playNewOrderSound();
+        if (updatedOrder.id == null) {
+          log('OrderProvider: Invalid order data from websocket - missing ID after parsing');
+          return;
+        }
+
+        // Handle order updates exactly like last_mile_store
+        _handleOrderStatusChange(updatedOrder);
+
+        // Check if this is a new order or an update
+        final existingOrderIndex = _allOrders.indexWhere((order) => order.id == updatedOrder.id);
+        if (existingOrderIndex >= 0) {
+          // Update existing order
+          log('OrderProvider: Updating existing order ${updatedOrder.id} from websocket');
+          _allOrders[existingOrderIndex] = updatedOrder;
+          
+          // Update selected order if it matches
+          if (_selectedOrder?.id == updatedOrder.id) {
+            _selectedOrder = updatedOrder;
+          }
+        } else {
+          // Add new order to the beginning of the list
+          log('OrderProvider: Adding new order ${updatedOrder.id} from websocket');
+          _allOrders.insert(0, updatedOrder);
         }
         
-        // Refresh orders instead of trying to parse individual order data
-        _refreshOrdersFromWebsocket();
+        // Re-categorize orders and notify listeners
+        _categorizeOrders();
+        notifyListeners();
         return;
-      }
-      
-      // Try to parse as a complete order object
-      final updatedOrder = FainzyUserOrder.fromJson(orderData);
-      
-      if (updatedOrder.id == null) {
-        log('OrderProvider: Invalid order data from websocket - missing ID after parsing');
-        return;
+        
+      } catch (parseError) {
+        log('OrderProvider: Could not parse as complete order object: $parseError');
       }
 
-      // Check if this is a new order or an update
-      final existingOrderIndex = _allOrders.indexWhere((order) => order.id == updatedOrder.id);
+      // Fallback: Handle as event-based notification and refresh
+      final eventType = orderData['type'] ?? orderData['event_type'] ?? 'order_notification';
+      log('OrderProvider: Handling as event type: $eventType');
       
-      if (existingOrderIndex >= 0) {
-        // Update existing order
-        log('OrderProvider: Updating existing order ${updatedOrder.id} from websocket');
-        _allOrders[existingOrderIndex] = updatedOrder;
-        
-        // Update selected order if it matches
-        if (_selectedOrder?.id == updatedOrder.id) {
-          _selectedOrder = updatedOrder;
-        }
-      } else {
-        // Add new order to the beginning of the list
-        log('OrderProvider: Adding new order ${updatedOrder.id} from websocket');
-        _allOrders.insert(0, updatedOrder);
-        
-        // Play sound notification for new orders
-        _playNewOrderSound();
+      // Play sound notification for new orders
+      if (eventType == 'new_order' || eventType == 'order_notification') {
+        _playNewOrderSound(0); // Use 0 for event-based notifications without specific order ID
+        // Note: For event-based notifications, we'll handle the dialog in the refresh method
       }
       
-      // Re-categorize orders and notify listeners
-      _categorizeOrders();
-      notifyListeners();
+      // Refresh orders instead of trying to parse individual order data
+      _refreshOrdersFromWebsocket();
       
     } catch (e) {
       log('OrderProvider: Error processing websocket order update - $e, falling back to refresh');
@@ -249,25 +357,27 @@ class OrderProvider with ChangeNotifier {
       final orders = await _orderService.fetchOrders(subentityId);
       
       // Check for new orders that weren't in the previous list
-      bool hasNewOrders = false;
+      final newOrders = <FainzyUserOrder>[];
       for (final order in orders) {
         if (order.id != null && !existingOrderIds.contains(order.id)) {
-          hasNewOrders = true;
+          newOrders.add(order);
           log('OrderProvider: Detected new order ${order.id} during websocket refresh');
-          break;
         }
       }
       
-      // Play sound notification if new orders were detected
-      if (hasNewOrders) {
-        _playNewOrderSound();
+      // Play sound notification and show dialogs for new orders
+      if (newOrders.isNotEmpty) {
+        for (final order in newOrders) {
+          _playNewOrderSound(order.id!);
+          _showNewOrderNotification(order);
+        }
       }
       
       _allOrders = orders;
       _categorizeOrders();
       notifyListeners();
       
-      log('OrderProvider: Successfully refreshed ${orders.length} orders from websocket (new orders: $hasNewOrders)');
+      log('OrderProvider: Successfully refreshed ${orders.length} orders from websocket (new orders: ${newOrders.length})');
     } catch (e) {
       log('OrderProvider: Error refreshing orders from websocket - $e');
     }
@@ -278,13 +388,32 @@ class OrderProvider with ChangeNotifier {
     if (!_isWebsocketInitialized) return;
     
     log('OrderProvider: Disconnecting websocket...');
-    _orderStreamSubscription?.cancel();
-    _orderStreamSubscription = null;
-    _connectionStatusSubscription?.cancel();
-    _connectionStatusSubscription = null;
+    _cleanupWebsocketConnections();
     _webSocketService.disconnect();
     _isWebsocketInitialized = false;
-    log('OrderProvider: Websocket disconnected');
+    _connectionStatus = 'Disconnected';
+    notifyListeners();
+    log('OrderProvider: Websocket disconnected successfully');
+  }
+
+  /// Reset WebSocket initialization state (useful for reconnection scenarios)
+  void resetWebsocketState() {
+    log('OrderProvider: Resetting WebSocket state');
+    _isWebsocketInitialized = false;
+    _connectionStatus = 'Disconnected';
+    notifyListeners();
+  }
+
+  /// Force reconnect WebSocket (useful for network recovery)
+  void reconnectWebsocket(String storeID) {
+    log('OrderProvider: Force reconnecting WebSocket for store: $storeID');
+    disconnectWebsocket();
+    
+    // Small delay to ensure cleanup is complete
+    Future.delayed(const Duration(milliseconds: 500), () {
+      resetWebsocketState();
+      initializeWebsocket(storeID);
+    });
   }
 
   /// Fetch all orders and categorize them - matches OrderRepository pattern
@@ -351,6 +480,11 @@ class OrderProvider with ChangeNotifier {
       _clearError();
 
       log('OrderProvider: Updating order $orderId status to $status...');
+      
+      // Stop notification sound when order status is being updated
+      log('OrderProvider: Stopping notification sound for order $orderId due to status update');
+      _stopOrderSound(orderId);
+      
       await _orderService.updateOrderStatus(orderId: orderId, status: status);
       
       // Update the order in our local lists
@@ -609,6 +743,8 @@ class OrderProvider with ChangeNotifier {
 
   /// Clear all data and disconnect websocket
   void clearData() {
+    log('OrderProvider: Clearing all order data and disconnecting WebSocket');
+    
     _allOrders.clear();
     _pendingOrders.clear();
     _activeOrders.clear();
@@ -618,8 +754,19 @@ class OrderProvider with ChangeNotifier {
     _setStatus(OrderStatus.initial);
     _clearError();
     
+    // Clear notification tracking
+    _notifiedOrders.clear();
+    _existingOrders.clear();
+    
+    // Clear action states
+    _orderActionStates.clear();
+    _orderActionErrors.clear();
+    
     // Disconnect websocket when clearing data (on logout)
     disconnectWebsocket();
+    
+    notifyListeners();
+    log('OrderProvider: Data cleared successfully');
   }
 
   /// Dispose of resources when provider is destroyed
@@ -639,38 +786,35 @@ class OrderProvider with ChangeNotifier {
     return getOrdersByStatus(status).length;
   }
 
-  /// Get completed orders
-  List<FainzyUserOrder> get completedOrders =>
-      _allOrders.where((order) => order.status == 'completed').toList();
-
-  /// Get cancelled orders
-  List<FainzyUserOrder> get cancelledOrders =>
-      _allOrders.where((order) => order.status == 'cancelled').toList();
-
-  /// Get rejected orders
-  List<FainzyUserOrder> get rejectedOrders =>
-      _allOrders.where((order) => order.status == 'rejected').toList();
-
   /// Categorize orders into pending, active, and past based on order status
   void _categorizeOrders() {
+    // Sort all orders by creation date (latest first)
+    _allOrders.sort((a, b) {
+      final dateA = a.created ?? DateTime.now();
+      final dateB = b.created ?? DateTime.now();
+      return dateB.compareTo(dateA); // Descending order (latest first)
+    });
+    
     // Pending orders: orders waiting for store action
     _pendingOrders = _allOrders.where((order) => 
       order.status == 'pending'
     ).toList();
     
-    // Past orders: completed, cancelled, or rejected orders
+    // Past orders: completed, cancelled, rejected, or refunded orders
     _pastOrders = _allOrders.where((order) => 
       order.status == 'completed' || 
       order.status == 'rejected' || 
-      order.status == 'cancelled'
+      order.status == 'cancelled' ||
+      order.status == 'refunded'
     ).toList();
     
-    // Active orders: any order that is not pending, completed, cancelled, or rejected
+    // Active orders: any order that is not pending, completed, cancelled, rejected, or refunded
     _activeOrders = _allOrders.where((order) => 
       order.status != 'pending' &&
       order.status != 'completed' && 
       order.status != 'rejected' && 
-      order.status != 'cancelled'
+      order.status != 'cancelled' &&
+      order.status != 'refunded'
     ).toList();
     
     log('OrderProvider: Categorized orders - Pending: ${_pendingOrders.length}, Active: ${_activeOrders.length}, Past: ${_pastOrders.length}');
@@ -723,6 +867,63 @@ class OrderProvider with ChangeNotifier {
     if (_error != null) {
       _error = null;
       notifyListeners();
+    }
+  }
+
+  /// Handle order status changes and audio notifications exactly like last_mile_store
+  void _handleOrderStatusChange(FainzyUserOrder order) {
+    if (order.id == null) return;
+    
+    final orderId = order.id!;
+    final status = order.status;
+    
+    if (_lastStatus != status) {
+      _existingOrders.clear();
+    }
+
+    log('OrderProvider: New order update from websocket: $status');
+    
+    // Add detailed logging for payment-related status changes
+    if (status == 'payment_processing') {
+      log('🔄 Order $orderId is now in payment_processing status - waiting for user payment');
+    }
+    
+    if (status == 'order_processing') {
+      log('✅ Order $orderId payment confirmed - order is now processing');
+    }
+    
+    // Play sound for new pending orders (matches last_mile_store exactly)
+    if (status == 'pending' && !_existingOrders.contains(orderId)) {
+      log('🔔 New pending order detected: $orderId');
+      log('🔊 Triggering audio for new order');
+      _playNewOrderSound(orderId);
+      _showNewOrderNotification(order);
+    }
+
+    // Play sound for robot arrived (matches last_mile_store exactly)
+    if (status == 'robot_arrived_for_pickup' && !_existingOrders.contains(orderId)) {
+      log('🤖 Robot arrived for pickup - playing sound');
+      _playRobotArrivedSound(orderId);
+    }
+
+    // Play sound for payment confirmed (matches last_mile_store exactly)
+    if (status == 'order_processing' && !_existingOrders.contains(orderId)) {
+      log('💳 Payment confirmed - playing sound');
+      _playPaymentConfirmedSound(orderId);
+    }
+
+    // Track this order to prevent duplicate notifications
+    _existingOrders.add(orderId);
+    _lastStatus = status ?? '';
+
+    // Stop sounds when order reaches final states (matches last_mile_store exactly)
+    if (_existingOrders.contains(orderId) &&
+        (status == 'rejected' ||
+         status == 'cancelled' ||
+         status == 'refunded' ||
+         status == 'completed')) {
+      log('🛑 Order $orderId reached final state ($status) - stopping sound');
+      _stopOrderSound(orderId);
     }
   }
 

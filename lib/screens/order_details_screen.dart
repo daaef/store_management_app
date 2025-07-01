@@ -177,6 +177,7 @@ class _OrderDetailsView extends StatelessWidget {
     final price = menuPrice != null 
         ? CurrencyFormatter.format(menuPrice, currencyCode: 'JPY')
         : '¥0';
+    final sides = item.sides as List<dynamic>? ?? [];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -210,6 +211,48 @@ class _OrderDetailsView extends StatelessWidget {
                     color: AppColors.grey400,
                   ),
                 ),
+                // Show sides if available
+                if (sides.isNotEmpty) ...[
+                  const Gap(8),
+                  Text(
+                    'Sides:',
+                    style: AppTextStyle.body2.copyWith(
+                      color: AppColors.grey600,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Gap(4),
+                  ...sides.map((side) {
+                    final sideName = side['name'] ?? side['title'] ?? 'Unknown Side';
+                    final sidePrice = side['price'];
+                    final formattedSidePrice = sidePrice != null 
+                        ? CurrencyFormatter.format(sidePrice.toDouble(), currencyCode: 'JPY')
+                        : '';
+                    
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 8, bottom: 2),
+                      child: Row(
+                        children: [
+                          Text(
+                            '• $sideName',
+                            style: AppTextStyle.caption.copyWith(
+                              color: AppColors.grey500,
+                            ),
+                          ),
+                          if (formattedSidePrice.isNotEmpty) ...[
+                            const Spacer(),
+                            Text(
+                              formattedSidePrice,
+                              style: AppTextStyle.caption.copyWith(
+                                color: AppColors.grey500,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ],
               ],
             ),
           ),
